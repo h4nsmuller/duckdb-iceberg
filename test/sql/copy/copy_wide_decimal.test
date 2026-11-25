@@ -1,0 +1,44 @@
+# name: test/sql/copy/copy_wide_decimal.test
+# description: COPY ... (FORMAT ICEBERG) rejects decimals of more than 38 digits
+# group: [copy]
+
+include test/sql/init_requires
+
+require json
+
+statement error
+COPY (SELECT 1.25::DECIMAL(50, 2) AS d) TO '{TEST_DIR}/iceberg_wide_decimal' (FORMAT ICEBERG);
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(50,2)
+
+statement error
+COPY (SELECT 1::DECIMAL(38, 2) + 1::DECIMAL(38, 2) AS d) TO '{TEST_DIR}/iceberg_wide_decimal' (FORMAT ICEBERG);
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(39,2)
+
+statement error
+COPY (SELECT {'a': 1, 'd': 1.25::DECIMAL(266, 2)} AS s) TO '{TEST_DIR}/iceberg_wide_decimal' (FORMAT ICEBERG);
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(266,2)
+
+# nothing was written
+statement error
+SELECT * FROM iceberg_scan('{TEST_DIR}/iceberg_wide_decimal');
+----
+<REGEX>:.*(No such file|does not exist|Cannot open|No version).*
+
+# narrowing the expression first is the way to store it
+statement ok
+COPY (SELECT (1::DECIMAL(38, 2) + 1::DECIMAL(38, 2))::DECIMAL(38, 2) AS d, 170141183460469231731687303715884105727::HUGEINT % 1000 AS h)
+TO '{TEST_DIR}/iceberg_wide_decimal' (FORMAT ICEBERG);
+
+query IIII
+SELECT d, typeof(d), h, typeof(h) FROM iceberg_scan('{TEST_DIR}/iceberg_wide_decimal');
+----
+2.00	DECIMAL(38,2)	727	DECIMAL(38,0)
+
+# a HUGEINT column is a decimal(38, 0): larger values are rejected
+statement error
+COPY (SELECT 100000000000000000000000000000000000000::HUGEINT AS h) TO '{TEST_DIR}/iceberg_hugeint_out_of_range' (FORMAT ICEBERG);
+----
+<REGEX>:.*Conversion Error.*DECIMAL\(38,0\).*

@@ -1,0 +1,285 @@
+# name: test/sql/local/catalog_test_config_setup/catalog_agnostic/decimal/test_wide_decimal.test
+# description: Iceberg decimals stop at 38 digits: wider DuckDB decimals are rejected with a clear error
+# group: [decimal]
+
+require-env CATALOG_TEST_CONFIG_SETUP
+
+include test/sql/init_requires
+
+require core_functions
+
+statement ok
+drop table if exists my_datalake.default.wide_decimal;
+
+# CREATE TABLE
+statement error
+create table my_datalake.default.wide_decimal (id INTEGER, d DECIMAL(50, 2));
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(50,2)
+
+statement error
+create table my_datalake.default.wide_decimal (id INTEGER, d DECIMAL(39, 0));
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(39,0)
+
+# a width that would wrap around in 8 bits
+statement error
+create table my_datalake.default.wide_decimal (id INTEGER, d DECIMAL(266, 2));
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(266,2)
+
+# nested
+statement error
+create table my_datalake.default.wide_decimal (id INTEGER, s STRUCT(a INTEGER, d DECIMAL(50, 2)));
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(50,2)
+
+statement error
+create table my_datalake.default.wide_decimal (id INTEGER, l DECIMAL(50, 2)[]);
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(50,2)
+
+statement error
+create table my_datalake.default.wide_decimal (id INTEGER, m MAP(VARCHAR, DECIMAL(50, 2)));
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(50,2)
+
+# CREATE TABLE AS: decimal arithmetic widens past 38 digits by default
+query I
+select typeof(1::DECIMAL(38, 2) + 1::DECIMAL(38, 2));
+----
+DECIMAL(39,2)
+
+statement error
+create table my_datalake.default.wide_decimal as select 1::DECIMAL(38, 2) + 1::DECIMAL(38, 2) as d;
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(39,2)
+
+statement error
+create table my_datalake.default.wide_decimal as
+select 123456789012345678901234567890123456789012345678.25 as d;
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(50,2)
+
+# inside a transaction the statement itself fails, not the commit
+statement ok
+begin
+
+statement error
+create table my_datalake.default.wide_decimal (id INTEGER, d DECIMAL(50, 2));
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(50,2)
+
+statement ok
+rollback
+
+# no table was created by any of the above
+statement error
+select * from my_datalake.default.wide_decimal;
+----
+does not exist
+
+statement ok
+create table my_datalake.default.wide_decimal (id INTEGER, d DECIMAL(38, 2));
+
+# ALTER TABLE
+statement error
+alter table my_datalake.default.wide_decimal add column e DECIMAL(50, 2);
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(50,2)
+
+statement ok
+drop table if exists my_datalake.default.wide_decimal_evolve;
+
+statement ok
+create table my_datalake.default.wide_decimal_evolve (id INTEGER, d DECIMAL(10, 2));
+
+statement ok
+alter table my_datalake.default.wide_decimal_evolve alter column d type DECIMAL(38, 2);
+
+statement error
+alter table my_datalake.default.wide_decimal_evolve alter column d type DECIMAL(39, 2);
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(39,2)
+
+# inside a transaction as well
+statement ok
+begin
+
+statement error
+alter table my_datalake.default.wide_decimal_evolve alter column d type DECIMAL(50, 2);
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(50,2)
+
+statement ok
+rollback
+
+statement error
+alter table my_datalake.default.wide_decimal_evolve alter column d type DECIMAL(266, 2);
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(266,2)
+
+query II
+select column_name, column_type from (describe my_datalake.default.wide_decimal_evolve) order by all;
+----
+d	DECIMAL(38,2)
+id	INTEGER
+
+# INSERT of a wide expression is the engine's ordinary cast to the column type
+statement ok
+insert into my_datalake.default.wide_decimal values (1, 1.25::DECIMAL(50, 2));
+
+statement ok
+insert into my_datalake.default.wide_decimal
+values (2, 99999999999999999999999999999999999.99::DECIMAL(38, 2) + 0.01::DECIMAL(38, 2));
+
+statement error
+insert into my_datalake.default.wide_decimal
+values (3, 999999999999999999999999999999999999.99::DECIMAL(38, 2) + 0.01::DECIMAL(38, 2));
+----
+<REGEX>:.*Conversion Error.*DECIMAL\(38,2\).*
+
+statement error
+insert into my_datalake.default.wide_decimal values (4, 123456789012345678901234567890123456789012345678.25);
+----
+<REGEX>:.*Conversion Error.*DECIMAL\(38,2\).*
+
+query II
+select * from my_datalake.default.wide_decimal order by id;
+----
+1	1.25
+2	100000000000000000000000000000000000.00
+
+# comparisons with wide decimals read the right rows
+query I
+select id from my_datalake.default.wide_decimal where d = 1.25::DECIMAL(50, 2);
+----
+1
+
+query I
+select id from my_datalake.default.wide_decimal
+where d < 123456789012345678901234567890123456789012345678.25 order by id;
+----
+1
+2
+
+query I
+select id from my_datalake.default.wide_decimal where d > 123456789012345678901234567890123456789012345678.25;
+----
+
+query I
+select id from my_datalake.default.wide_decimal where d + d > 1000000::DECIMAL(38, 2) order by id;
+----
+2
+
+# the same on partitioned tables, where predicates are also used to prune partitions
+foreach partitioning d bucket(4,d) truncate(100,d)
+
+statement ok
+drop table if exists my_datalake.default.wide_decimal_partitioned;
+
+statement ok
+create table my_datalake.default.wide_decimal_partitioned (id INTEGER, d DECIMAL(38, 2)) partitioned by ({partitioning});
+
+statement ok
+insert into my_datalake.default.wide_decimal_partitioned
+values (1, 1.25::DECIMAL(50, 2)), (2, 7.5), (3, 99999999999999999999999999999999999.99::DECIMAL(38, 2) + 0.01::DECIMAL(38, 2));
+
+statement error
+insert into my_datalake.default.wide_decimal_partitioned
+values (4, 123456789012345678901234567890123456789012345678.25);
+----
+<REGEX>:.*Conversion Error.*DECIMAL\(38,2\).*
+
+query I
+select id from my_datalake.default.wide_decimal_partitioned where d = 1.25::DECIMAL(50, 2);
+----
+1
+
+query I
+select id from my_datalake.default.wide_decimal_partitioned where d = 7.5::DECIMAL(39, 1);
+----
+2
+
+query I
+select id from my_datalake.default.wide_decimal_partitioned
+where d < 123456789012345678901234567890123456789012345678.25 order by id;
+----
+1
+2
+3
+
+query I
+select id from my_datalake.default.wide_decimal_partitioned
+where d >= 123456789012345678901234567890123456789012345678.25;
+----
+
+statement ok
+delete from my_datalake.default.wide_decimal_partitioned where d = 7.5::DECIMAL(50, 2);
+
+statement ok
+update my_datalake.default.wide_decimal_partitioned set d = d + 1::DECIMAL(38, 2) where id = 1;
+
+statement error
+update my_datalake.default.wide_decimal_partitioned set d = d * 1000::DECIMAL(38, 2) where id = 3;
+----
+<REGEX>:.*Conversion Error.*DECIMAL\(38,2\).*
+
+query II
+select * from my_datalake.default.wide_decimal_partitioned order by id;
+----
+1	2.25
+3	100000000000000000000000000000000000.00
+
+endloop
+
+# the partition transform functions
+statement error
+select iceberg_bucket(4, 1.25::DECIMAL(50, 2));
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(50,2)
+
+statement error
+select iceberg_truncate(10, 1.25::DECIMAL(50, 2));
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(50,2)
+
+statement error
+select iceberg_bucket(4, d + d) from my_datalake.default.wide_decimal;
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(39,2)
+
+statement error
+select iceberg_truncate(10, d + d) from my_datalake.default.wide_decimal;
+----
+Iceberg decimals support at most 38 digits of precision, got DECIMAL(39,2)
+
+query II
+select iceberg_bucket(4, d) between 0 and 3, iceberg_truncate(10, d) from my_datalake.default.wide_decimal where id = 1;
+----
+true	1.20
+
+# HUGEINT maps to decimal(38, 0); a sum of DECIMAL(38, 0) values that leaves that range is rejected as well
+statement ok
+drop table if exists my_datalake.default.wide_decimal_hugeint;
+
+statement ok
+create table my_datalake.default.wide_decimal_hugeint (h HUGEINT);
+
+statement ok
+insert into my_datalake.default.wide_decimal_hugeint values (99999999999999999999999999999999999999::HUGEINT);
+
+statement error
+insert into my_datalake.default.wide_decimal_hugeint select h + h from my_datalake.default.wide_decimal_hugeint;
+----
+<REGEX>:.*Conversion Error.*DECIMAL\(38,0\).*
+
+statement error
+insert into my_datalake.default.wide_decimal_hugeint values (100000000000000000000000000000000000000::HUGEINT);
+----
+<REGEX>:.*Conversion Error.*DECIMAL\(38,0\).*
+
+query I
+select * from my_datalake.default.wide_decimal_hugeint;
+----
+99999999999999999999999999999999999999
