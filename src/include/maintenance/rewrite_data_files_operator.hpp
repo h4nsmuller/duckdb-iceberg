@@ -45,8 +45,9 @@ public:
 
 protected:
 	IcebergFileRewriteInput GetRewriteInput(const IcebergFileRewriteGlobalState &state) const override;
-	void StageRewrite(IcebergTransactionData &transaction_data, const IcebergFileRewriteGlobalState &state,
-	                  IcebergSnapshotOperationType operation, vector<IcebergManifestEntry> &&new_entries,
+	void StageRewrite(ClientContext &context, IcebergTransactionData &transaction_data,
+	                  const IcebergFileRewriteGlobalState &state, IcebergSnapshotOperationType operation,
+	                  vector<IcebergManifestEntry> &&new_entries,
 	                  IcebergManifestDeletes &&replaced_files) const override;
 };
 

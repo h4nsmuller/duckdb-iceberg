@@ -1,6 +1,7 @@
 #define CATCH_CONFIG_RUNNER
 #include "catch.hpp"
 #include "duckdb.hpp"
+#include "duckdb/common/local_file_system.hpp"
 #include "duckdb/common/types/uuid.hpp"
 #include "duckdb/logging/log_type.hpp"
 #include "catalog/rest/api/catalog_api.hpp"
@@ -19,8 +20,8 @@ namespace {
 
 struct LoadTableCacheTest {
 	LoadTableCacheTest()
-	    : root(FileSystem::CreateLocal()->JoinPath(FileSystem::GetWorkingDirectory(), "duckdb_unittest_tempdir",
-	                                               "load-table-api-" + UUID::ToString(UUID::GenerateRandomUUID()))),
+	    : root(LocalFileSystem().JoinPath(FileSystem::GetWorkingDirectory(), "duckdb_unittest_tempdir",
+	                                      "load-table-api-" + UUID::ToString(UUID::GenerateRandomUUID()))),
 	      database(nullptr), connection(database) {
 		Query("CALL iceberg_test_catalog_init('" + root + "')");
 		Query("ATTACH '' AS lake (TYPE ICEBERG, URI 'http://iceberg-mock.invalid', "
@@ -37,7 +38,7 @@ struct LoadTableCacheTest {
 
 	~LoadTableCacheTest() {
 		connection.Query("ROLLBACK");
-		FileSystem::CreateLocal()->RemoveDirectory(root);
+		LocalFileSystem().RemoveDirectory(root);
 	}
 
 	template <typename... ARGS>
@@ -288,7 +289,7 @@ TEST_CASE("Staleness reads and table copies share metadata until a writer detach
 	auto parsed = table.GetMetadataOwner();
 	auto copy = table.Copy();
 	auto &transaction = IcebergTransaction::Get(*test.connection.context, test.Catalog());
-	auto transaction_copy = table.Copy(transaction);
+	auto transaction_copy = table.Copy(*test.connection.context);
 	REQUIRE(copy.GetMetadataOwner() == parsed);
 	REQUIRE(transaction_copy.GetMetadataOwner() == parsed);
 
@@ -416,7 +417,7 @@ TEST_CASE("Historical transaction metadata has its own owner outside the head ca
 	future.metadata_log.emplace_back(path, timestamp_ms_t(start.value - 1));
 	future.table_properties["owner-test"] = "future";
 	auto &transaction = IcebergTransaction::Get(*test.connection.context, test.Catalog());
-	auto reconstructed = future_table.Copy(transaction);
+	auto reconstructed = future_table.Copy(*test.connection.context);
 	REQUIRE(reconstructed.GetMetadataOwner() != head);
 	REQUIRE(reconstructed.GetMetadataOwner() != future_table.GetMetadataOwner());
 	REQUIRE(reconstructed.GetMetadata().GetTableProperty("owner-test") == "historical");

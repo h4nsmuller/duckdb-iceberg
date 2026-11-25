@@ -232,7 +232,7 @@ PhysicalOperator &IcebergCatalog::PlanUpdate(ClientContext &context, PhysicalPla
 
 	auto &irc_transaction = IcebergTransaction::Get(context, *this);
 	auto &alter = irc_transaction.GetOrCreateAlter();
-	auto &updated_table = alter.GetOrInitializeTable(table_entry.table_info);
+	auto &updated_table = alter.GetOrInitializeTable(context, table_entry.table_info);
 	auto &table_metadata = updated_table.GetMetadata();
 	auto &schema = table_metadata.GetLatestSchema();
 	auto &updated_table_entry = *updated_table.schema_versions[schema.schema_id];

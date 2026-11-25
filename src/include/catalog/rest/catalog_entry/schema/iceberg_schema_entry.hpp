@@ -35,7 +35,6 @@ public:
 	                                              CreateCopyFunctionInfo &info) override;
 	optional_ptr<CatalogEntry> CreatePragmaFunction(CatalogTransaction transaction,
 	                                                CreatePragmaFunctionInfo &info) override;
-	optional_ptr<CatalogEntry> CreateCollation(CatalogTransaction transaction, CreateCollationInfo &info) override;
 	optional_ptr<CatalogEntry> CreateType(CatalogTransaction transaction, CreateTypeInfo &info) override;
 	void Alter(CatalogTransaction transaction, AlterInfo &info) override;
 	//! Move a column or struct field of 'table' among its siblings (iceberg_move_column). Returns the schema id that

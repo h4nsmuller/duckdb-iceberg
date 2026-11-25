@@ -19,7 +19,7 @@ public:
 
 public:
 	IcebergTable &CreateTable(const string &table_key, IcebergTable &&table);
-	IcebergTable &GetOrInitializeTable(const IcebergTable &table);
+	IcebergTable &GetOrInitializeTable(ClientContext &context, const IcebergTable &table);
 	bool HasUpdates() const;
 
 public:

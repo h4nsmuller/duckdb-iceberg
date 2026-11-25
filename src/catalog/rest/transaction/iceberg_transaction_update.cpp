@@ -9,13 +9,13 @@ IcebergTransactionAlterUpdate::IcebergTransactionAlterUpdate(IcebergTransaction 
 IcebergTransactionAlterUpdate::~IcebergTransactionAlterUpdate() {
 }
 
-IcebergTable &IcebergTransactionAlterUpdate::GetOrInitializeTable(const IcebergTable &table) {
+IcebergTable &IcebergTransactionAlterUpdate::GetOrInitializeTable(ClientContext &context, const IcebergTable &table) {
 	auto table_key = table.GetTableKey();
 	auto it = updated_tables.find(table_key);
 	if (it == updated_tables.end()) {
 		auto state = transaction.GetLatestTableState(table_key);
-		auto &transaction_state = state ? *state : transaction.GetOrCreateTransactionTableState(table);
-		auto &updated_table = transaction_state.GetOrCreateTransactionInfo(transaction);
+		auto &transaction_state = state ? *state : transaction.GetOrCreateTransactionTableState(context, table);
+		auto &updated_table = transaction_state.GetOrCreateTransactionInfo(context);
 		it = updated_tables.emplace(table_key, updated_table).first;
 		transaction.VerifyAlterUpdateAtomicity(*this);
 	}

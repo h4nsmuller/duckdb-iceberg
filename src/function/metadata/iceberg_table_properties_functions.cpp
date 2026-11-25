@@ -178,7 +178,7 @@ static void SetIcebergTablePropertiesFunction(ClientContext &context, TableFunct
 	auto &table_info = iceberg_table->table_info;
 
 	auto &iceberg_transaction = IcebergTransaction::Get(context, iceberg_table->catalog);
-	ApplyTableUpdate(table_info, iceberg_transaction, [&](IcebergTable &tbl) {
+	ApplyTableUpdate(context, table_info, iceberg_transaction, [&](IcebergTable &tbl) {
 		auto &transaction_data = tbl.GetOrCreateTransactionData(iceberg_transaction);
 		transaction_data.TableSetProperties(bind_data.properties);
 		// Later statements, including write-mode checks, must see this transaction's property changes.
@@ -212,7 +212,7 @@ static void RemoveIcebergTablePropertiesFunction(ClientContext &context, TableFu
 	auto &table_info = iceberg_table->table_info;
 	auto &iceberg_transaction = IcebergTransaction::Get(context, iceberg_table->catalog);
 	idx_t property_count = 0;
-	ApplyTableUpdate(table_info, iceberg_transaction, [&](IcebergTable &tbl) {
+	ApplyTableUpdate(context, table_info, iceberg_transaction, [&](IcebergTable &tbl) {
 		auto &transaction_data = tbl.GetOrCreateTransactionData(iceberg_transaction);
 		transaction_data.TableRemoveProperties(bind_data.remove_properties);
 		for (auto &property : bind_data.remove_properties) {

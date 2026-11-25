@@ -113,16 +113,17 @@ SinkFinalizeType IcebergFileRewrite::Finalize(Pipeline &pipeline, Event &event, 
 	auto &transaction = IcebergTransaction::Get(context, state.table_info.catalog);
 	auto files = IcebergWrittenFiles::Collect(new_entries);
 	//! ApplyTableUpdate runs the rewrite operators of one statement one at a time
-	ApplyTableUpdate(state.table_info, transaction, [&](IcebergTable &table) {
+	ApplyTableUpdate(context, state.table_info, transaction, [&](IcebergTable &table) {
 		auto &transaction_data = table.GetOrCreateTransactionData(transaction);
-		StageRewrite(transaction_data, state, rewrite.operation, std::move(new_entries), std::move(replaced_files));
+		StageRewrite(context, transaction_data, state, rewrite.operation, std::move(new_entries),
+		             std::move(replaced_files));
 	});
 	state.staged = true;
 	IcebergWrittenFiles::Record(context, state.table_info, write_operation, files);
 	return SinkFinalizeType::READY;
 }
 
-void IcebergFileRewrite::StageRewrite(IcebergTransactionData &transaction_data,
+void IcebergFileRewrite::StageRewrite(ClientContext &context, IcebergTransactionData &transaction_data,
                                       const IcebergFileRewriteGlobalState &state,
                                       IcebergSnapshotOperationType operation,
                                       vector<IcebergManifestEntry> &&new_entries,
@@ -131,9 +132,9 @@ void IcebergFileRewrite::StageRewrite(IcebergTransactionData &transaction_data,
 		if (!new_entries.empty()) {
 			throw InternalException("A file-removal-only rewrite cannot add data files");
 		}
-		transaction_data.AddDeleteSnapshot(partitioned_manifest_entry_map_t(), std::move(replaced_files));
+		transaction_data.AddDeleteSnapshot(context, partitioned_manifest_entry_map_t(), std::move(replaced_files));
 	} else {
-		transaction_data.AddSnapshot(operation, std::move(new_entries), std::move(replaced_files));
+		transaction_data.AddSnapshot(context, operation, std::move(new_entries), std::move(replaced_files));
 	}
 }
 

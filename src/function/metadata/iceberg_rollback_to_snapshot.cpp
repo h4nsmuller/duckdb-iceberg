@@ -100,7 +100,7 @@ static void IcebergRollbackToSnapshotFunction(ClientContext &context, TableFunct
 	int64_t previous_snapshot_id = 0;
 
 	auto &iceberg_transaction = IcebergTransaction::Get(context, iceberg_table->catalog);
-	ApplyTableUpdate(table_info, iceberg_transaction, [&](IcebergTable &tbl) {
+	ApplyTableUpdate(context, table_info, iceberg_transaction, [&](IcebergTable &tbl) {
 		//! Read under the lock: another function of this statement may be changing this table
 		auto previous_snapshot = table_info.GetMetadata().GetLatestSnapshot();
 		if (previous_snapshot) {

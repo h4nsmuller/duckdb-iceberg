@@ -283,7 +283,7 @@ void IcebergTableSet::DropEntry(ClientContext &context, DropInfo &info, bool del
 
 	// Add the table to the transaction's deleted tables.
 	auto &transaction = IcebergTransaction::Get(context, catalog).Cast<IcebergTransaction>();
-	auto &table = transaction.DeleteTable(*entry->second);
+	auto &table = transaction.DeleteTable(context, *entry->second);
 	//! FIXME: Schema versions point back to their IcebergTable and must be reinitialized after the copy.
 	table.InitSchemaVersions();
 }
@@ -502,14 +502,14 @@ IcebergTable &IcebergTableSet::CreateNewEntry(ClientContext &context, IcebergCat
 	return table_info;
 }
 
-static void ReplaceSortOrder(IcebergTransaction &transaction, IcebergTable &table_info,
+static void ReplaceSortOrder(ClientContext &context, IcebergTransaction &transaction, IcebergTable &table_info,
                              const vector<unique_ptr<ParsedExpression>> &sort_keys, const IcebergTableSchema &schema) {
 	vector<OrderByNode> orders;
 	orders.reserve(sort_keys.size());
 	for (auto &key : sort_keys) {
 		orders.emplace_back(OrderType::ORDER_DEFAULT, OrderByNullType::ORDER_DEFAULT, key->Copy());
 	}
-	table_info.SetSortedBy(transaction, orders, schema);
+	table_info.SetSortedBy(context, transaction, orders, schema);
 }
 
 void IcebergTableSet::ReplaceDefinition(ClientContext &context, IcebergTable &table_info, const CreateTableInfo &info) {
@@ -580,7 +580,7 @@ void IcebergTableSet::ReplaceDefinition(ClientContext &context, IcebergTable &ta
 
 	// Partitioning and sort order do not carry over from the replaced definition.
 	table_info.SetPartitionedBy(iceberg_transaction, info.partition_keys, current_schema);
-	ReplaceSortOrder(iceberg_transaction, table_info, info.sort_keys, current_schema);
+	ReplaceSortOrder(context, iceberg_transaction, table_info, info.sort_keys, current_schema);
 
 	if (!properties.empty()) {
 		for (auto &property : properties) {
@@ -646,8 +646,8 @@ optional_ptr<CatalogEntry> IcebergTableSet::GetEntry(ClientContext &context, con
 	}
 	iceberg_transaction.tables[table_key] = new_version;
 	auto &state = iceberg_transaction.SetCatalogTableState(new_version);
-	if (iceberg_transaction.StartedBefore(table_info.GetMetadata().last_updated_ms)) {
-		state.GetOrCreateTransactionInfo(iceberg_transaction);
+	if (iceberg_transaction.StartedBefore(context, table_info.GetMetadata().last_updated_ms)) {
+		state.GetOrCreateTransactionInfo(context);
 	}
 	return state.GetInfo().GetSchemaVersion(at);
 }

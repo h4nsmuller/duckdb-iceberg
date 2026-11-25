@@ -1,6 +1,7 @@
 #include "catalog/rest/transaction/iceberg_transaction.hpp"
 
 #include "duckdb/common/assert.hpp"
+#include "duckdb/main/context.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/logging/logger.hpp"
 #include "duckdb/common/types/timestamp.hpp"
@@ -61,21 +62,21 @@ const IcebergTable &IcebergTransactionTableState::GetInfo() const {
 	return const_cast<IcebergTransactionTableState &>(*this).GetInfo();
 }
 
-IcebergTable &IcebergTransactionTableState::GetOrCreateTransactionInfo(IcebergTransaction &transaction) {
+IcebergTable &IcebergTransactionTableState::GetOrCreateTransactionInfo(ClientContext &context) {
 	if (transaction_table) {
 		return *transaction_table;
 	}
 	if (!catalog_table) {
 		throw InternalException("Cannot materialize transaction table state without table information");
 	}
-	transaction_table = make_uniq<IcebergTable>(catalog_table->Copy(transaction));
+	transaction_table = make_uniq<IcebergTable>(catalog_table->Copy(context));
 	transaction_table->InitSchemaVersions();
 	return *transaction_table;
 }
 
-IcebergTransaction::IcebergTransaction(IcebergCatalog &ic_catalog, TransactionManager &manager, ClientContext &context)
-    : Transaction(manager, context), db(*context.db), catalog(ic_catalog), access_mode(ic_catalog.access_mode),
-      scan_serialization_id(UUID::GenerateRandomUUID()) {
+IcebergTransaction::IcebergTransaction(IcebergCatalog &ic_catalog, TransactionManager &manager, Context &context)
+    : Transaction(manager, context), db(context.GetDatabase()), catalog(ic_catalog),
+      access_mode(ic_catalog.access_mode), scan_serialization_id(UUID::GenerateRandomUUID()) {
 }
 
 IcebergTransaction::~IcebergTransaction() = default;
@@ -525,7 +526,7 @@ static bool CommitStateUnknown(const ErrorData &error) {
 	return true;
 }
 
-void IcebergTransaction::Commit() {
+void IcebergTransaction::Commit(ClientContext &context) {
 	if (!HasTableUpdate() && created_schemas.Empty() && deleted_schemas.empty() && schema_property_updates.empty() &&
 	    created_views.empty() && deleted_views.empty()) {
 		// Read-only transactions have no catalog commit work; temporary vended storage secrets
@@ -548,9 +549,7 @@ void IcebergTransaction::Commit() {
 	auto &temp_con_context = temp_con.context;
 
 	// Copy user settings from the original context so that e.g. s3_access_key_id are available
-	if (!this->context.expired()) {
-		temp_con_context->config = this->context.lock()->config;
-	}
+	ClientConfig::GetConfig(*temp_con_context) = ClientConfig::GetConfig(context);
 
 	try {
 		DoSchemaCreates(*temp_con_context);
@@ -1053,9 +1052,8 @@ IcebergTransaction &IcebergTransaction::Get(ClientContext &context, Catalog &cat
 	return Transaction::Get(context, catalog).Cast<IcebergTransaction>();
 }
 
-bool IcebergTransaction::StartedBefore(timestamp_ms_t timestamp_ms) const {
-	auto ctx = context.lock();
-	auto transaction_start_ms = IcebergUtils::GetTransactionStartTimeMS(*ctx);
+bool IcebergTransaction::StartedBefore(ClientContext &context, timestamp_ms_t timestamp_ms) const {
+	auto transaction_start_ms = IcebergUtils::GetTransactionStartTimeMS(context);
 	return transaction_start_ms < timestamp_ms;
 }
 
@@ -1098,13 +1096,14 @@ IcebergTransaction::SetTransactionTableState(const string &table_key, IcebergTab
 	return it->second;
 }
 
-IcebergTransactionTableState &IcebergTransaction::GetOrCreateTransactionTableState(const IcebergTable &table) {
+IcebergTransactionTableState &IcebergTransaction::GetOrCreateTransactionTableState(ClientContext &context,
+                                                                                   const IcebergTable &table) {
 	auto table_key = table.GetTableKey();
 	auto state = GetLatestTableState(table_key);
 	if (state) {
 		return *state;
 	}
-	auto copy = table.Copy(*this);
+	auto copy = table.Copy(context);
 	return SetTransactionTableState(table_key, std::move(copy), IcebergTableStatus::ALIVE);
 }
 
@@ -1120,7 +1119,7 @@ IcebergTransactionAlterUpdate &IcebergTransaction::GetOrCreateAlter() {
 	return *alter_update;
 }
 
-IcebergTable &IcebergTransaction::DeleteTable(IcebergTable &table) {
+IcebergTable &IcebergTransaction::DeleteTable(ClientContext &context, IcebergTable &table) {
 	auto table_key = table.GetTableKey();
 	auto state = GetLatestTableState(table_key);
 	if (HasTableUpdate()) {
@@ -1129,15 +1128,15 @@ IcebergTable &IcebergTransaction::DeleteTable(IcebergTable &table) {
 	}
 
 	if (!state) {
-		state = GetOrCreateTransactionTableState(table);
+		state = GetOrCreateTransactionTableState(context, table);
 	}
-	auto &deleted_table = state->GetOrCreateTransactionInfo(*this);
+	auto &deleted_table = state->GetOrCreateTransactionInfo(context);
 	state->SetStatus(IcebergTableStatus::DROPPED);
 	transaction_update.emplace<IcebergTransactionDeleteUpdate>(*this, deleted_table);
 	return state->GetInfo();
 }
 
-IcebergTable &IcebergTransaction::RenameTable(IcebergTable &table, const string &new_name) {
+IcebergTable &IcebergTransaction::RenameTable(ClientContext &context, IcebergTable &table, const string &new_name) {
 	auto table_key = table.GetTableKey();
 	auto state = GetLatestTableState(table_key);
 	if (HasTableUpdate()) {
@@ -1146,7 +1145,7 @@ IcebergTable &IcebergTransaction::RenameTable(IcebergTable &table, const string 
 	}
 
 	if (!state) {
-		state = GetOrCreateTransactionTableState(table);
+		state = GetOrCreateTransactionTableState(context, table);
 	}
 	state->SetStatus(IcebergTableStatus::RENAMED);
 	auto &source_table = state->GetInfo();
@@ -1160,19 +1159,19 @@ IcebergTable &IcebergTransaction::RenameTable(IcebergTable &table, const string 
 	return state->GetInfo();
 }
 
-void ApplyTableUpdate(unique_lock<mutex> &table_update_guard, IcebergTable &table_info,
+void ApplyTableUpdate(ClientContext &context, unique_lock<mutex> &table_update_guard, IcebergTable &table_info,
                       IcebergTransaction &iceberg_transaction, const std::function<void(IcebergTable &)> &callback) {
 	D_ASSERT(table_update_guard.owns_lock() && table_update_guard.mutex() == &iceberg_transaction.table_update_lock);
 	auto &alter = iceberg_transaction.GetOrCreateAlter();
-	auto &updated_table = alter.GetOrInitializeTable(table_info);
+	auto &updated_table = alter.GetOrInitializeTable(context, table_info);
 	callback(updated_table);
 }
 
-void ApplyTableUpdate(IcebergTable &table_info, IcebergTransaction &iceberg_transaction,
+void ApplyTableUpdate(ClientContext &context, IcebergTable &table_info, IcebergTransaction &iceberg_transaction,
                       const std::function<void(IcebergTable &)> &callback) {
 	//! Several operators or table functions of one statement can change tables of this transaction concurrently
 	unique_lock<mutex> guard(iceberg_transaction.table_update_lock);
-	ApplyTableUpdate(guard, table_info, iceberg_transaction, callback);
+	ApplyTableUpdate(context, guard, table_info, iceberg_transaction, callback);
 }
 
 } // namespace duckdb

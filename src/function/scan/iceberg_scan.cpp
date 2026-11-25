@@ -81,7 +81,7 @@ static bool IcebergScanSerializationEnabled(ClientContext &context) {
 	return DEFAULT_ENABLE_SCAN_SERIALIZATION;
 }
 
-static void IcebergScanSerialize(Serializer &serializer, const optional_ptr<FunctionData> bind_data,
+static void IcebergScanSerialize(Serializer &serializer, const optional_ptr<const FunctionData> bind_data,
                                  const BoundTableFunction &function) {
 	if (!bind_data || !function.function_info) {
 		throw NotImplementedException("IcebergScan serialization requires bound scan state");
@@ -103,7 +103,7 @@ static void IcebergScanSerialize(Serializer &serializer, const optional_ptr<Func
 	}
 	if (!scan_info.serialization_query_id.IsValid() ||
 	    scan_info.serialization_query_id.GetIndex() == MAXIMUM_QUERY_ID || !context.HasActiveTransaction() ||
-	    scan_info.serialization_query_id.GetIndex() != context.ActiveTransaction().active_query.load()) {
+	    scan_info.serialization_query_id.GetIndex() != context.transaction.GetActiveQuery()) {
 		throw NotImplementedException(
 		    "IcebergScan serialization is only supported within the statement that bound the scan");
 	}
@@ -180,7 +180,7 @@ static unique_ptr<FunctionData> IcebergScanDeserialize(Deserializer &deserialize
 	// Snapshot/schema IDs do not identify transaction-local writes, credentials, or attachment options.
 	// Reject delayed and cross-connection replay before resolving any table state.
 	if (!context.HasActiveTransaction() || !query_id.IsValid() || query_id.GetIndex() == MAXIMUM_QUERY_ID ||
-	    query_id.GetIndex() != context.ActiveTransaction().active_query.load()) {
+	    query_id.GetIndex() != context.transaction.GetActiveQuery()) {
 		ThrowCannotCopyScan(qualified_name, "serialization is only supported within the statement that bound the scan");
 	}
 	auto catalog = Catalog::GetCatalogEntry(context, qualified_name.Catalog());
@@ -274,13 +274,13 @@ BindInfo IcebergBindInfo(TableFunctionGetBindInfoInput &input) {
 	return result;
 }
 
-static void IcebergSetScanOrder(unique_ptr<RowGroupOrderOptions> order_options, optional_ptr<FunctionData> bind_data) {
-	auto &multi_file_data = bind_data->Cast<MultiFileBindData>();
+static void IcebergSetScanOrder(unique_ptr<RowGroupOrderOptions> order_options, cow_ptr<FunctionData> &bind_data) {
+	auto &multi_file_data = bind_data.write().Cast<MultiFileBindData>();
 	auto &file_list = multi_file_data.file_list->Cast<IcebergMultiFileList>();
 	file_list.GetScanPlanner().SetScanOrder(std::move(order_options));
 }
 
-static vector<column_t> IcebergGetRowIdColumns(ClientContext &, optional_ptr<FunctionData>) {
+static vector<column_t> IcebergGetRowIdColumns(ClientContext &, optional_ptr<const FunctionData>) {
 	vector<column_t> result;
 	result.push_back(MultiFileReader::COLUMN_IDENTIFIER_FILENAME);
 	result.push_back(MultiFileReader::COLUMN_IDENTIFIER_FILE_ROW_NUMBER);

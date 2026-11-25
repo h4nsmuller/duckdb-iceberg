@@ -396,11 +396,11 @@ SinkFinalizeType IcebergInsert::Finalize(Pipeline &pipeline, Event &event, Clien
 		auto &delete_global_state = update_delete_op->sink_state->Cast<IcebergDeleteGlobalState>();
 		auto delete_manifest_entries = IcebergDelete::GenerateDeleteManifestEntries(delete_global_state);
 		if (!written_files.empty()) {
-			ApplyTableUpdate(table_info, iceberg_transaction, [&](IcebergTable &tbl) {
+			ApplyTableUpdate(context, table_info, iceberg_transaction, [&](IcebergTable &tbl) {
 				auto &transaction_data = tbl.GetOrCreateTransactionData(iceberg_transaction);
-				transaction_data.AddUpdateSnapshot(std::move(delete_manifest_entries), std::move(written_files),
-				                                   std::move(delete_global_state.write_result.altered_manifests),
-				                                   merge_action);
+				transaction_data.AddUpdateSnapshot(
+				    context, std::move(delete_manifest_entries), std::move(written_files),
+				    std::move(delete_global_state.write_result.altered_manifests), merge_action);
 			});
 		}
 		if (delete_global_state.merge_deletes) {
@@ -410,10 +410,10 @@ SinkFinalizeType IcebergInsert::Finalize(Pipeline &pipeline, Event &event, Clien
 	} else {
 		// Stage an INSERT statement or a MERGE insert action; the latter may join an overwrite snapshot.
 		if (!written_files.empty()) {
-			ApplyTableUpdate(table_info, iceberg_transaction, [&](IcebergTable &tbl) {
+			ApplyTableUpdate(context, table_info, iceberg_transaction, [&](IcebergTable &tbl) {
 				auto &transaction_data = tbl.GetOrCreateTransactionData(iceberg_transaction);
 				IcebergManifestDeletes empty_deletes;
-				transaction_data.AddSnapshot(IcebergSnapshotOperationType::APPEND, std::move(written_files),
+				transaction_data.AddSnapshot(context, IcebergSnapshotOperationType::APPEND, std::move(written_files),
 				                             std::move(empty_deletes), merge_action);
 			});
 		}
@@ -523,7 +523,13 @@ static unique_ptr<Expression> GetDateDiffFunction(ClientContext &context, const 
 	if (source_type == LogicalTypeId::TIMESTAMP_TZ_NS) {
 		target_type = LogicalType::TIMESTAMP_NS;
 	}
-	source = BoundCastExpression::AddDefaultCastToType(std::move(source), target_type);
+	if (source->GetReturnType() != target_type) {
+		// the built-in TIMESTAMPTZ -> TIMESTAMP cast keeps the UTC value, independent of the session time zone
+		CastFunctionSet default_casts;
+		auto get_input = GetCastFunctionInput::Default();
+		auto bound_cast = default_casts.GetCastFunction(source->GetReturnType(), target_type, get_input);
+		source = BoundCastExpression::Create(std::move(source), target_type, std::move(bound_cast));
+	}
 	if (target_type.id() == LogicalTypeId::TIMESTAMP_NS) {
 		source = BoundCastExpression::Create(std::move(source), LogicalType::TIMESTAMP,
 		                                     BoundCastInfo(CastTimestampNsToTimestampFloor));
@@ -1287,7 +1293,7 @@ PhysicalOperator &IcebergCatalog::PlanInsert(ClientContext &context, PhysicalPla
 	auto &irc_transaction = IcebergTransaction::Get(context, *this);
 
 	auto &alter = irc_transaction.GetOrCreateAlter();
-	auto &updated_table = alter.GetOrInitializeTable(table_entry.table_info);
+	auto &updated_table = alter.GetOrInitializeTable(context, table_entry.table_info);
 	auto &table_metadata = updated_table.GetMetadata();
 	if (table_metadata.iceberg_version < 2) {
 		throw NotImplementedException("Insert into Iceberg V%d tables", table_metadata.iceberg_version);

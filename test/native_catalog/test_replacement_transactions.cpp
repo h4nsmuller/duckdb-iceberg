@@ -1,6 +1,7 @@
 #define CATCH_CONFIG_RUNNER
 #include "catch.hpp"
 #include "duckdb.hpp"
+#include "duckdb/common/local_file_system.hpp"
 // Catch includes Windows headers, whose DELETE macro conflicts with Iceberg's enums.
 #include "duckdb/common/windows_undefs.hpp"
 #include "duckdb/common/types/uuid.hpp"
@@ -45,8 +46,8 @@ void CheckRows(Connection &connection, const vector<int32_t> &expected, const st
 
 struct ReplacementTest {
 	explicit ReplacementTest(int version = 2, bool populated = true)
-	    : root(FileSystem::CreateLocal()->JoinPath(FileSystem::GetWorkingDirectory(), "duckdb_unittest_tempdir",
-	                                               "replacement-api-" + UUID::ToString(UUID::GenerateRandomUUID()))),
+	    : root(LocalFileSystem().JoinPath(FileSystem::GetWorkingDirectory(), "duckdb_unittest_tempdir",
+	                                      "replacement-api-" + UUID::ToString(UUID::GenerateRandomUUID()))),
 	      database(nullptr), connection(database) {
 		Query(connection, "CALL iceberg_test_catalog_init('" + root + "')");
 		Query(connection, "ATTACH '' AS lake (TYPE ICEBERG, URI 'http://iceberg-mock.invalid', "
@@ -65,7 +66,7 @@ struct ReplacementTest {
 
 	~ReplacementTest() {
 		connection.Query("ROLLBACK");
-		FileSystem::CreateLocal()->RemoveDirectory(root);
+		LocalFileSystem().RemoveDirectory(root);
 	}
 
 	IcebergCatalog &Catalog() {
@@ -78,7 +79,7 @@ struct ReplacementTest {
 		auto &table =
 		    duckdb::Catalog::GetEntry(*connection.context, lookup).Cast<IcebergTableSchemaVersion>().table_info;
 		auto &transaction = IcebergTransaction::Get(*connection.context, Catalog());
-		auto &updated_table = transaction.GetOrCreateAlter().GetOrInitializeTable(table);
+		auto &updated_table = transaction.GetOrCreateAlter().GetOrInitializeTable(*connection.context, table);
 		updated_table.GetOrCreateTransactionData(transaction);
 		return updated_table;
 	}

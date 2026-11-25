@@ -1,6 +1,7 @@
 #define CATCH_CONFIG_RUNNER
 #include "catch.hpp"
 #include "duckdb.hpp"
+#include "duckdb/common/local_file_system.hpp"
 #include "duckdb/common/serializer/binary_deserializer.hpp"
 #include "duckdb/common/serializer/binary_serializer.hpp"
 #include "duckdb/common/serializer/memory_stream.hpp"
@@ -28,8 +29,8 @@ struct BoundScan {
 
 struct ScanSerializationTest {
 	ScanSerializationTest()
-	    : root(FileSystem::CreateLocal()->JoinPath(FileSystem::GetWorkingDirectory(), "duckdb_unittest_tempdir",
-	                                               "scan-api-" + UUID::ToString(UUID::GenerateRandomUUID()))),
+	    : root(LocalFileSystem().JoinPath(FileSystem::GetWorkingDirectory(), "duckdb_unittest_tempdir",
+	                                      "scan-api-" + UUID::ToString(UUID::GenerateRandomUUID()))),
 	      database(nullptr), connection(database) {
 		Query(connection, "CALL iceberg_test_catalog_init('" + root + "')");
 		Query(connection, "ATTACH '' AS lake (TYPE ICEBERG, URI 'http://iceberg-mock.invalid', "
@@ -43,12 +44,12 @@ struct ScanSerializationTest {
 
 	~ScanSerializationTest() {
 		connection.Query("ROLLBACK");
-		FileSystem::CreateLocal()->RemoveDirectory(root);
+		LocalFileSystem().RemoveDirectory(root);
 	}
 
 	void StartQuery() {
 		auto &context = *connection.context;
-		MetaTransaction::Get(context).SetActiveQuery(DatabaseManager::Get(context).GetNewQueryNumber());
+		context.transaction.SetActiveQuery(DatabaseManager::Get(context).GetNewQueryNumber());
 	}
 
 	BoundScan Bind() {
@@ -219,8 +220,7 @@ TEST_CASE("Iceberg scan serialization rejects reuse outside its binding statemen
 		Connection other(test.database);
 		Query(other, "BEGIN");
 		// Matching a query number is insufficient: the transaction identity must also match.
-		MetaTransaction::Get(*other.context)
-		    .SetActiveQuery(MetaTransaction::Get(*test.connection.context).GetActiveQuery());
+		other.context->transaction.SetActiveQuery(test.connection.context->transaction.GetActiveQuery());
 		REQUIRE_THROWS_WITH(test.Deserialize(original, stream, other),
 		                    Catch::Contains("within the statement that bound the scan"));
 		Query(other, "ROLLBACK");

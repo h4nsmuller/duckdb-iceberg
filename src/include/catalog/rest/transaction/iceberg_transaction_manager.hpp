@@ -11,9 +11,9 @@ class IcebergTransactionManager : public TransactionManager {
 public:
 	IcebergTransactionManager(AttachedDatabase &db_p, IcebergCatalog &ic_catalog);
 
-	Transaction &StartTransaction(ClientContext &context) override;
+	Transaction &StartTransaction(Context &context, MetaTransaction &meta_transaction) override;
 	ErrorData CommitTransaction(ClientContext &context, Transaction &transaction) override;
-	void RollbackTransaction(Transaction &transaction) override;
+	void RollbackTransaction(ClientContext &context, Transaction &transaction) override;
 
 	void Checkpoint(ClientContext &context, bool force = false) override;
 

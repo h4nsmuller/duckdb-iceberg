@@ -1,5 +1,6 @@
 #include "catch.hpp"
 #include "duckdb.hpp"
+#include "duckdb/common/local_file_system.hpp"
 #include "common/iceberg_utils.hpp"
 #include "core/metadata/iceberg_table_metadata.hpp"
 #include "core/metadata/manifest/iceberg_manifest_list.hpp"
@@ -164,7 +165,7 @@ struct MetadataReadTest {
 	}
 
 	static string Fixture(const string &path) {
-		auto fs = FileSystem::CreateLocal();
+		auto fs = make_uniq<LocalFileSystem>();
 		return IcebergUtils::FileToString(
 		    fs->JoinPath(FileSystem::GetWorkingDirectory(), "data/persistent/iceberg", path), *fs);
 	}

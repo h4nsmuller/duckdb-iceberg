@@ -318,11 +318,6 @@ optional_ptr<CatalogEntry> IcebergSchemaEntry::CreatePragmaFunction(CatalogTrans
 	throw BinderException("Iceberg databases do not support creating pragma functions");
 }
 
-optional_ptr<CatalogEntry> IcebergSchemaEntry::CreateCollation(CatalogTransaction transaction,
-                                                               CreateCollationInfo &info) {
-	throw BinderException("Iceberg databases do not support creating collations");
-}
-
 static optional_ptr<const IcebergSortOrderField>
 FindCurrentSortOrderFieldBySourceId(const IcebergTableMetadata &table_metadata, idx_t column_id,
                                     int32_t &sort_order_id);
@@ -353,12 +348,12 @@ static void VerifySchemaEvolution(const IcebergTableMetadata &table_metadata, co
 		if (target_type.id() != LogicalTypeId::DECIMAL) {
 			break;
 		}
-		uint8_t width;
-		uint8_t scale;
+		uint32_t width;
+		uint32_t scale;
 		original_type.GetDecimalProperties(width, scale);
 
-		uint8_t other_width;
-		uint8_t other_scale;
+		uint32_t other_width;
+		uint32_t other_scale;
 		target_type.GetDecimalProperties(other_width, other_scale);
 
 		if (scale != other_scale) {
@@ -674,13 +669,13 @@ void IcebergSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) 
 				}
 				D_ASSERT(state && state->IsDroppedOrRenamed());
 			}
-			irc_transaction.RenameTable(catalog_table_info, new_name.GetIdentifierName());
+			irc_transaction.RenameTable(context, catalog_table_info, new_name.GetIdentifierName());
 			return;
 		}
 	}
 
 	auto &alter = irc_transaction.GetOrCreateAlter();
-	auto &updated_table = alter.GetOrInitializeTable(catalog_table_info);
+	auto &updated_table = alter.GetOrInitializeTable(context, catalog_table_info);
 	auto &transaction_data = updated_table.GetOrCreateTransactionData(irc_transaction);
 	auto &current_schema = updated_table.GetMetadataMutable().GetLatestSchema();
 
@@ -743,7 +738,7 @@ void IcebergSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) 
 		// Ensure last assigned partition field id is up to date
 		transaction_data.TableAddAssertLastAssignedPartitionId();
 
-		updated_table.SetSortedBy(irc_transaction, sort_info.orders, current_schema);
+		updated_table.SetSortedBy(context, irc_transaction, sort_info.orders, current_schema);
 		return;
 	}
 	case AlterTableType::ADD_COLUMN: {
@@ -1199,7 +1194,7 @@ pair<int32_t, int32_t> IcebergSchemaEntry::MoveColumn(ClientContext &context, Ic
 		return make_pair(previous_schema_id, previous_schema_id);
 	}
 	auto current_schema_id = previous_schema_id;
-	ApplyTableUpdate(guard, table.table_info, irc_transaction, [&](IcebergTable &updated_table) {
+	ApplyTableUpdate(context, guard, table.table_info, irc_transaction, [&](IcebergTable &updated_table) {
 		auto &transaction_data = updated_table.GetOrCreateTransactionData(irc_transaction);
 		//! A move that restores an earlier order only sets the current schema, so the commit has to assert the schema
 		//! it replaces: otherwise it would undo a schema change another writer committed in the meantime

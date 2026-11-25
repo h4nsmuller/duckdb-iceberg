@@ -654,16 +654,16 @@ void IcebergTable::SetPartitionedBy(IcebergTransaction &transaction,
 	transaction_data.TableSetDefaultSpec();
 }
 
-void IcebergTable::SetSortedBy(IcebergTransaction &transaction, const vector<OrderByNode> &orders,
-                               const IcebergTableSchema &schema, bool first_sort_spec) {
+void IcebergTable::SetSortedBy(ClientContext &context, IcebergTransaction &transaction,
+                               const vector<OrderByNode> &orders, const IcebergTableSchema &schema,
+                               bool first_sort_spec) {
 	auto &metadata = GetMetadataMutable();
 	idx_t new_sort_order_id = UNSORTED_SORT_ORDER_ID;
 	if (!first_sort_spec && !orders.empty()) {
 		new_sort_order_id = GetNextSortOrderId();
 	}
 
-	auto context = transaction.context.lock();
-	auto new_sort_order = BuildSortOrder(*context, orders, schema, static_cast<int32_t>(new_sort_order_id));
+	auto new_sort_order = BuildSortOrder(context, orders, schema, static_cast<int32_t>(new_sort_order_id));
 
 	// if spec definition already exists in a previous spec definition, set it to that spec id
 	// (some catalog may allow duplicate definitions, others not)
@@ -947,10 +947,7 @@ IcebergTableMetadata IcebergTable::CreateMetadataFromLog(ClientContext &context,
 	return IcebergTableMetadata::FromTableMetadata(parsed_metadata);
 }
 
-IcebergTable IcebergTable::Copy(IcebergTransaction &iceberg_transaction) const {
-	auto locked_context = iceberg_transaction.context.lock();
-	auto &context = *locked_context;
-
+IcebergTable IcebergTable::Copy(ClientContext &context) const {
 	auto ret = Copy();
 	auto transaction_start_ms = IcebergUtils::GetTransactionStartTimeMS(context);
 	auto clock_skew_ms = DEFAULT_METADATA_LOG_CLOCK_SKEW_MS;
@@ -1039,8 +1036,7 @@ shared_ptr<IcebergTable> IcebergTable::CreatePlaceholder(IcebergCatalog &catalog
 IcebergTransactionData &IcebergTable::GetOrCreateTransactionData(IcebergTransaction &transaction) {
 	lock_guard<mutex> guard(transaction.lock);
 	if (!transaction_data) {
-		auto context = transaction.context.lock();
-		transaction_data = make_uniq<IcebergTransactionData>(*context, transaction, *this);
+		transaction_data = make_uniq<IcebergTransactionData>(transaction, *this);
 	}
 	return *transaction_data;
 }

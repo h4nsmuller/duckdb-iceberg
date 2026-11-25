@@ -52,7 +52,7 @@ public:
 	optional<int64_t> GetExistingSortOrderId(IcebergSortOrder &sort_order);
 	void SetPartitionedBy(IcebergTransaction &transaction, const vector<unique_ptr<ParsedExpression>> &partition_keys,
 	                      const IcebergTableSchema &schema);
-	void SetSortedBy(IcebergTransaction &transaction, const vector<OrderByNode> &orders,
+	void SetSortedBy(ClientContext &context, IcebergTransaction &transaction, const vector<OrderByNode> &orders,
 	                 const IcebergTableSchema &schema, bool first_sort_spec = false);
 	//! Build an IcebergPartitionSpec from parsed PARTITIONED BY expressions and a schema.
 	static IcebergPartitionSpec BuildPartitionSpec(const vector<unique_ptr<ParsedExpression>> &partition_keys,
@@ -85,7 +85,7 @@ public:
 	                                           timestamp_ms_t metadata_cutoff_ms) const;
 	// With metadata-log enabled, reconstruct table state at transaction start plus the clock-skew allowance.
 	// Otherwise pin and copy the complete catalog state that was resolved for this transaction.
-	IcebergTable Copy(IcebergTransaction &iceberg_transaction) const;
+	IcebergTable Copy(ClientContext &context) const;
 	// This copy is used for deletes, where we don't care about valid table state
 	IcebergTable Copy() const;
 	void InitSchemaVersions();

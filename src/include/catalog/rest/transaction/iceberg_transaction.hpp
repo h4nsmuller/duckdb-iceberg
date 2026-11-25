@@ -34,7 +34,7 @@ public:
 		return *catalog_table;
 	}
 	const IcebergTable &GetInfo() const;
-	IcebergTable &GetOrCreateTransactionInfo(IcebergTransaction &transaction);
+	IcebergTable &GetOrCreateTransactionInfo(ClientContext &context);
 
 public:
 	bool IsDroppedOrRenamed() const {
@@ -77,12 +77,12 @@ public:
 	friend struct IcebergTransactionData;
 	friend struct IcebergTransactionAlterUpdate;
 
-	IcebergTransaction(IcebergCatalog &ic_catalog, TransactionManager &manager, ClientContext &context);
+	IcebergTransaction(IcebergCatalog &ic_catalog, TransactionManager &manager, Context &context);
 	~IcebergTransaction() override;
 
 public:
 	void Start();
-	void Commit();
+	void Commit(ClientContext &context);
 	void Rollback();
 	static IcebergTransaction &Get(ClientContext &context, Catalog &catalog);
 	AccessMode GetAccessMode() const {
@@ -107,12 +107,12 @@ public:
 	IcebergTransactionTableState &SetCatalogTableState(shared_ptr<IcebergTable> table);
 	IcebergTransactionTableState &SetTransactionTableState(const string &table_key, IcebergTable &&table,
 	                                                       IcebergTableStatus status);
-	IcebergTransactionTableState &GetOrCreateTransactionTableState(const IcebergTable &table);
+	IcebergTransactionTableState &GetOrCreateTransactionTableState(ClientContext &context, const IcebergTable &table);
 	IcebergTransactionTableState &SetLatestTableState(const string &table_key, IcebergTableStatus status);
-	bool StartedBefore(timestamp_ms_t timestamp_ms) const;
+	bool StartedBefore(ClientContext &context, timestamp_ms_t timestamp_ms) const;
 	IcebergTransactionAlterUpdate &GetOrCreateAlter();
-	IcebergTable &DeleteTable(IcebergTable &table);
-	IcebergTable &RenameTable(IcebergTable &table, const string &new_name);
+	IcebergTable &DeleteTable(ClientContext &context, IcebergTable &table);
+	IcebergTable &RenameTable(ClientContext &context, IcebergTable &table, const string &new_name);
 	bool MultiTableCommitAvailable() const;
 	//! Register a table the catalog created without stage-create, which exists there ahead of the commit.
 	void TableCreatedInCatalog(const string &table_key, const vector<string> &namespace_items, const string &name,
@@ -208,10 +208,10 @@ public:
 
 //! Registers 'table_info' as changed in the transaction and applies 'callback' to its transaction-local state, while
 //! holding IcebergTransaction::table_update_lock. The lock is not recursive: 'callback' must not call ApplyTableUpdate
-void ApplyTableUpdate(IcebergTable &table_info, IcebergTransaction &iceberg_transaction,
+void ApplyTableUpdate(ClientContext &context, IcebergTable &table_info, IcebergTransaction &iceberg_transaction,
                       const std::function<void(IcebergTable &)> &callback);
 //! The same for a caller that holds the lock already: 'table_update_guard' has to own table_update_lock
-void ApplyTableUpdate(unique_lock<mutex> &table_update_guard, IcebergTable &table_info,
+void ApplyTableUpdate(ClientContext &context, unique_lock<mutex> &table_update_guard, IcebergTable &table_info,
                       IcebergTransaction &iceberg_transaction, const std::function<void(IcebergTable &)> &callback);
 
 } // namespace duckdb

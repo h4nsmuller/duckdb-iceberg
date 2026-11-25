@@ -112,7 +112,7 @@ IcebergFileRewriteInput PhysicalRewriteDataFiles::GetRewriteInput(const IcebergF
 	return result;
 }
 
-void PhysicalRewriteDataFiles::StageRewrite(IcebergTransactionData &transaction_data,
+void PhysicalRewriteDataFiles::StageRewrite(ClientContext &context, IcebergTransactionData &transaction_data,
                                             const IcebergFileRewriteGlobalState &state,
                                             IcebergSnapshotOperationType operation,
                                             vector<IcebergManifestEntry> &&new_entries,
@@ -128,7 +128,7 @@ void PhysicalRewriteDataFiles::StageRewrite(IcebergTransactionData &transaction_
 		//! Recheck at execution: other operators in this statement may have staged changes since binding.
 		ValidateRewriteTransaction(transaction_data);
 	}
-	IcebergFileRewrite::StageRewrite(transaction_data, state, operation, std::move(new_entries),
+	IcebergFileRewrite::StageRewrite(context, transaction_data, state, operation, std::move(new_entries),
 	                                 std::move(replaced_files));
 	//! This is a maintenance restriction, not an implicit side effect of writing a REPLACE snapshot.
 	lock_guard<mutex> guard(transaction_data.lock);

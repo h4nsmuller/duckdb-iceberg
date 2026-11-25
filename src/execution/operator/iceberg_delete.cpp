@@ -104,7 +104,7 @@ unique_ptr<GlobalSinkState> IcebergDelete::GetGlobalSinkState(ClientContext &con
 	if (merge_delete_action_index.IsValid()) {
 		auto &transaction = IcebergTransaction::Get(context, table.catalog);
 		auto &transaction_data = table.table_info.GetOrCreateTransactionData(transaction);
-		result->merge_deletes = transaction_data.GetMergeDeleteCollector(merge_delete_action_count);
+		result->merge_deletes = transaction_data.GetMergeDeleteCollector(context, merge_delete_action_count);
 	}
 	return std::move(result);
 }
@@ -671,9 +671,9 @@ void IcebergDelete::AddDeleteSnapshot(ClientContext &context, IcebergDeleteGloba
 	auto &iceberg_transaction = IcebergTransaction::Get(context, table.catalog);
 	auto iceberg_delete_files = GenerateDeleteManifestEntries(global_state);
 	if (!global_state.write_result.written_files.empty()) {
-		ApplyTableUpdate(table.table_info, iceberg_transaction, [&](IcebergTable &tbl) {
+		ApplyTableUpdate(context, table.table_info, iceberg_transaction, [&](IcebergTable &tbl) {
 			auto &transaction_data = tbl.GetOrCreateTransactionData(iceberg_transaction);
-			transaction_data.AddDeleteSnapshot(std::move(iceberg_delete_files),
+			transaction_data.AddDeleteSnapshot(context, std::move(iceberg_delete_files),
 			                                   std::move(global_state.write_result.altered_manifests), merge_action);
 		});
 	}
@@ -738,7 +738,7 @@ PhysicalOperator &IcebergCatalog::PlanDelete(ClientContext &context, PhysicalPla
 	if (!op.return_chunk && !irc_transaction.planning_merge_into) {
 		auto &table_entry = op.table.Cast<IcebergTableSchemaVersion>();
 		auto &alter = irc_transaction.GetOrCreateAlter();
-		auto &updated_table = alter.GetOrInitializeTable(table_entry.table_info);
+		auto &updated_table = alter.GetOrInitializeTable(context, table_entry.table_info);
 		auto &table_metadata = updated_table.GetMetadata();
 		//! V3 is not supported yet: a rewrite has to carry each kept row's lineage into the new files. A V3 DELETE
 		//! continues below, where a copy-on-write mode is refused as before.
@@ -768,7 +768,7 @@ PhysicalOperator &IcebergCatalog::PlanDeleteOperation(ClientContext &context, Ph
 
 	auto &irc_transaction = IcebergTransaction::Get(context, *this);
 	auto &alter = irc_transaction.GetOrCreateAlter();
-	auto &updated_table = alter.GetOrInitializeTable(table_entry.table_info);
+	auto &updated_table = alter.GetOrInitializeTable(context, table_entry.table_info);
 	auto &table_metadata = updated_table.GetMetadata();
 	auto &schema = table_metadata.GetLatestSchema();
 	auto &updated_table_entry = *updated_table.schema_versions[schema.schema_id];

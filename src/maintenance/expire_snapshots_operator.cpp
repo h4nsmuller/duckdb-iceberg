@@ -34,7 +34,7 @@ IcebergTable &LoadTransactionVisibleTable(ClientContext &context, const Qualifie
 		transaction_state = transaction.SetCatalogTableState(std::move(catalog_table));
 		//! Materialize the transaction-visible copy before planning. This honors
 		//! metadata-log time travel and guarantees staging reuses the same object.
-		transaction_state->GetOrCreateTransactionInfo(transaction);
+		transaction_state->GetOrCreateTransactionInfo(context);
 		transaction_state->MarkExpirationMetadataInitialized();
 	}
 	if (!transaction_state->IsAlive()) {
@@ -101,7 +101,7 @@ ExpireSnapshotsPlan ExecuteSnapshotExpiration(ClientContext &context, const Expi
 		return plan;
 	}
 
-	ApplyTableUpdate(guard, visible_table, transaction, [&](IcebergTable &table) {
+	ApplyTableUpdate(context, guard, visible_table, transaction, [&](IcebergTable &table) {
 		auto &transaction_data = table.GetOrCreateTransactionData(transaction);
 		transaction_data.TableRemoveSnapshots(plan.to_expire);
 		//! Mirror the staged update so another call in this transaction replans

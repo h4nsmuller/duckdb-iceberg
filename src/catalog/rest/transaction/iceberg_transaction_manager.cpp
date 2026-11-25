@@ -7,7 +7,7 @@ IcebergTransactionManager::IcebergTransactionManager(AttachedDatabase &db_p, Ice
     : TransactionManager(db_p), ic_catalog(ic_catalog) {
 }
 
-Transaction &IcebergTransactionManager::StartTransaction(ClientContext &context) {
+Transaction &IcebergTransactionManager::StartTransaction(Context &context, MetaTransaction &) {
 	auto transaction = make_uniq<IcebergTransaction>(ic_catalog, *this, context);
 	transaction->Start();
 	auto &result = *transaction;
@@ -19,7 +19,7 @@ Transaction &IcebergTransactionManager::StartTransaction(ClientContext &context)
 ErrorData IcebergTransactionManager::CommitTransaction(ClientContext &context, Transaction &transaction) {
 	auto &ic_transaction = transaction.Cast<IcebergTransaction>();
 	try {
-		ic_transaction.Commit();
+		ic_transaction.Commit(context);
 	} catch (std::exception &ex) {
 		return ErrorData(ex);
 	}
@@ -28,7 +28,7 @@ ErrorData IcebergTransactionManager::CommitTransaction(ClientContext &context, T
 	return ErrorData();
 }
 
-void IcebergTransactionManager::RollbackTransaction(Transaction &transaction) {
+void IcebergTransactionManager::RollbackTransaction(ClientContext &context, Transaction &transaction) {
 	auto &ic_transaction = transaction.Cast<IcebergTransaction>();
 	ic_transaction.Rollback();
 	lock_guard<mutex> l(transaction_lock);

@@ -82,7 +82,7 @@ static DeserializeResult DeserializeError(const string_t &blob, const LogicalTyp
 }
 
 template <class VALUE_TYPE>
-static Value DeserializeDecimalTemplated(const string_t &blob, uint8_t width, uint8_t scale) {
+static Value DeserializeDecimalTemplated(const string_t &blob, uint32_t width, uint32_t scale) {
 	VALUE_TYPE ret = 0;
 	//! The blob has to be smaller or equal to the size of the type
 	D_ASSERT(blob.GetSize() <= sizeof(VALUE_TYPE));
@@ -108,7 +108,7 @@ static Value DeserializeDecimalTemplated(const string_t &blob, uint8_t width, ui
 	return Value::DECIMAL(ret, width, scale);
 }
 
-static Value DeserializeHugeintDecimal(const string_t &blob, uint8_t width, uint8_t scale) {
+static Value DeserializeHugeintDecimal(const string_t &blob, uint32_t width, uint32_t scale) {
 	//! The blob has to be smaller or equal to the size of the type
 	D_ASSERT(blob.GetSize() <= sizeof(hugeint_t));
 
@@ -131,8 +131,8 @@ static Value DeserializeHugeintDecimal(const string_t &blob, uint8_t width, uint
 static DeserializeResult DeserializeDecimal(const string_t &blob, const LogicalType &type) {
 	D_ASSERT(type.id() == LogicalTypeId::DECIMAL);
 
-	uint8_t width;
-	uint8_t scale;
+	uint32_t width;
+	uint32_t scale;
 	if (!type.GetDecimalProperties(width, scale)) {
 		return DeserializeError(blob, type);
 	}

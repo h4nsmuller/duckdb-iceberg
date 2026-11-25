@@ -123,8 +123,8 @@ IcebergTableFilters Filters(ClientContext &context, const LogicalType &schema, c
 
 struct PlanningTest {
 	PlanningTest()
-	    : root(FileSystem::CreateLocal()->JoinPath(FileSystem::GetWorkingDirectory(), "duckdb_unittest_tempdir",
-	                                               "planning-api-" + UUID::ToString(UUID::GenerateRandomUUID()))),
+	    : root(LocalFileSystem().JoinPath(FileSystem::GetWorkingDirectory(), "duckdb_unittest_tempdir",
+	                                      "planning-api-" + UUID::ToString(UUID::GenerateRandomUUID()))),
 	      database(nullptr), connection(database) {
 		Query(connection, "CALL iceberg_test_catalog_init('" + root + "')");
 		Query(connection, "ATTACH '' AS lake (TYPE ICEBERG, URI 'http://iceberg-mock.invalid', "
@@ -135,13 +135,13 @@ struct PlanningTest {
 
 	~PlanningTest() {
 		connection.Query("ROLLBACK");
-		FileSystem::CreateLocal()->RemoveDirectory(root);
+		LocalFileSystem().RemoveDirectory(root);
 	}
 
 	unique_ptr<FunctionData> Bind() {
 		Query(connection, "BEGIN");
 		auto &context = *connection.context;
-		MetaTransaction::Get(context).SetActiveQuery(DatabaseManager::Get(context).GetNewQueryNumber());
+		context.transaction.SetActiveQuery(DatabaseManager::Get(context).GetNewQueryNumber());
 		EntryLookupInfo lookup(CatalogType::TABLE_ENTRY,
 		                       QualifiedName(Identifier("lake"), Identifier("default"), Identifier("t")));
 		auto &entry = Catalog::GetEntry(context, lookup).Cast<IcebergTableSchemaVersion>();
@@ -578,7 +578,7 @@ TEST_CASE("Iceberg delete loads retain owned file scope in their cache identity"
 		order = {3, 1, 3};
 	}
 	Query(test.connection, "BEGIN");
-	MetaTransaction::Get(context).SetActiveQuery(DatabaseManager::Get(context).GetNewQueryNumber());
+	context.transaction.SetActiveQuery(DatabaseManager::Get(context).GetNewQueryNumber());
 	for (auto index : order) {
 		auto plan = state.ProcessDeletes(execution, data_path, {descriptors[index]});
 		REQUIRE(plan.positional_deletes);
@@ -1400,7 +1400,7 @@ private:
 //! Throws from the next task start hook once armed, and lets a test wait until that happened.
 class ThrowingTaskStartState : public ClientContextState {
 public:
-	void OnTaskStart(ClientContext &context) override {
+	void OnTaskStart(Context &context) override {
 		{
 			lock_guard<mutex> guard(lock);
 			if (!armed) {
@@ -1678,8 +1678,8 @@ TEST_CASE("Iceberg delete file read task that fails before it runs reaches the o
 	// Two read tasks, and no thread besides the two callers below that could run them.
 	DeleteFileLoadTest test(IcebergDeleteExecutionState::DELETE_FILES_PER_READ_TASK + 1,
 	                        {"SET threads=2", "SET external_threads=2", "SET async_threads=0"});
-	auto hook =
-	    test.test.connection.context->registered_state->GetOrCreate<ThrowingTaskStartState>("throwing_task_start");
+	auto hook = test.test.connection.context->GetContext().GetRegisteredState().GetOrCreate<ThrowingTaskStartState>(
+	    "throwing_task_start");
 	auto &last = test.descriptors.back();
 	auto gated = make_uniq<GatedManifestFileSystem>(test.descriptors.front().file_path, 0);
 	auto &gate = *gated;
